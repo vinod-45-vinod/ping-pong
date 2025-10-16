@@ -1,13 +1,12 @@
 import pygame
 from .paddle import Paddle
 from .ball import Ball
-import time
 import os
 
 WHITE = (255, 255, 255)
 
 class GameEngine:
-    def __init__(self, width, height, win_score=5):
+    def __init__(self, width, height, paddle_sound=None, wall_sound=None, score_sound=None, win_score=5):
         self.width = width
         self.height = height
         self.paddle_width = 10
@@ -34,17 +33,10 @@ class GameEngine:
         self.winner_text = ""
         self.replay_menu_active = False
 
-        # Load sound effects
-        pygame.mixer.init()
-        self.sound_wall = self._load_sound("assets/wall.wav")
-        self.sound_paddle = self._load_sound("assets/paddle.wav")
-        self.sound_score = self._load_sound("assets/score.wav")
-
-    def _load_sound(self, path):
-        """Helper to safely load sounds"""
-        if os.path.exists(path):
-            return pygame.mixer.Sound(path)
-        return None
+        # Sounds
+        self.sound_paddle = paddle_sound
+        self.sound_wall = wall_sound
+        self.sound_score = score_sound
 
     def play_sound(self, sound):
         if sound:
@@ -58,23 +50,21 @@ class GameEngine:
             self.player.move(self.player.speed, self.height)
 
     def update(self):
-        # Replay menu or game over: don't update ball/paddles
         if self.replay_menu_active or self.game_over:
             return
 
-        # Move and check collisions
-        prev_vx, prev_vy = self.ball.velocity_x, self.ball.velocity_y
+        prev_vy = self.ball.velocity_y
         self.ball.move()
 
-        # Play wall sound when velocity_y flipped
+        # Wall bounce sound
         if self.ball.velocity_y != prev_vy:
             self.play_sound(self.sound_wall)
 
-        collided = self.ball.check_collision(self.player, self.ai)
-        if collided:
+        # Paddle collision sound
+        if self.ball.check_collision(self.player, self.ai):
             self.play_sound(self.sound_paddle)
 
-        # Scoring
+        # Score check
         if self.ball.x <= 0:
             self.ai_score += 1
             self.play_sound(self.sound_score)
@@ -84,14 +74,13 @@ class GameEngine:
             self.play_sound(self.sound_score)
             self._after_score(towards_player=True)
 
-        # AI tracking
-        self.ai.auto_track(self.ball, self.height)
+        # Smooth AI tracking
+        self._ai_track()
 
         # Check win
         if self.player_score >= self.win_score or self.ai_score >= self.win_score:
             self.game_over = True
             self.winner_text = "Player Wins!" if self.player_score > self.ai_score else "AI Wins!"
-            # Small pause before showing menu
             pygame.time.delay(600)
             self.replay_menu_active = True
 
@@ -99,8 +88,24 @@ class GameEngine:
         self.ball.reset(towards_player=towards_player)
         pygame.time.delay(400)
 
+    def _ai_track(self):
+        ai_center = self.ai.y + self.ai.height // 2
+        ball_center = self.ball.y + self.ball.height // 2
+        ai_speed = 5  # Max AI speed per frame
+
+        if ai_center < ball_center:
+            self.ai.y += min(ai_speed, ball_center - ai_center)
+        elif ai_center > ball_center:
+            self.ai.y -= min(ai_speed, ai_center - ball_center)
+
+        # Keep AI paddle inside screen
+        if self.ai.y < 0:
+            self.ai.y = 0
+        if self.ai.y + self.ai.height > self.height:
+            self.ai.y = self.height - self.ai.height
+
     def render(self, screen):
-        # Draw field
+        # Draw paddles and ball
         pygame.draw.rect(screen, WHITE, self.player.rect())
         pygame.draw.rect(screen, WHITE, self.ai.rect())
         pygame.draw.ellipse(screen, WHITE, self.ball.rect())
@@ -117,11 +122,10 @@ class GameEngine:
             overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 150))
             screen.blit(overlay, (0, 0))
-
             text = self.large_font.render(self.winner_text, True, WHITE)
             screen.blit(text, ((self.width - text.get_width()) // 2, self.height // 2 - 80))
 
-        # Replay Menu
+        # Replay menu
         if self.replay_menu_active:
             self._render_replay_menu(screen)
 
@@ -138,7 +142,7 @@ class GameEngine:
 
         keys = pygame.key.get_pressed()
         if keys[pygame.K_3]:
-            self._reset_game(win_score=2)  # best of 3 → first to 2
+            self._reset_game(win_score=2)
         elif keys[pygame.K_5]:
             self._reset_game(win_score=3)
         elif keys[pygame.K_7]:
